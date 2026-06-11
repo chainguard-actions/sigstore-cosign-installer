@@ -22,6 +22,23 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
     # We verify the version against a SHA **in the published action itself**, not in the GCS bucket.
     - shell: bash
       env:
@@ -82,7 +99,7 @@ runs:
         fi
 
         shaprog() {
-          case ${runner_os} in
+          case "${runner_os}" in
             Linux|linux)
               sha256sum "$1" | cut -d' ' -f1
               ;;
@@ -113,9 +130,9 @@ runs:
 
         pushd "${install_dir}" > /dev/null
 
-        case ${runner_os} in
+        case "${runner_os}" in
           Linux|linux)
-            case ${runner_arch} in
+            case "${runner_arch}" in
               X64|amd64)
                 bootstrap_filename='cosign-linux-amd64'
                 bootstrap_sha=${bootstrap_linux_amd64_sha}
@@ -142,7 +159,7 @@ runs:
             ;;
 
           macOS|macos)
-            case ${runner_arch} in
+            case "${runner_arch}" in
               X64|amd64)
                 bootstrap_filename='cosign-darwin-amd64'
                 bootstrap_sha=${bootstrap_darwin_amd64_sha}
@@ -163,7 +180,7 @@ runs:
             ;;
 
           Windows|windows)
-            case ${runner_arch} in
+            case "${runner_arch}" in
               X64|amd64)
                 bootstrap_filename='cosign-windows-amd64.exe'
                 bootstrap_sha=${bootstrap_windows_amd64_sha}
@@ -262,21 +279,18 @@ runs:
           $SUDO chmod +x "${cosign_executable_name}"
           log_info "Installation complete!"
         fi
-
     - if: ${{ runner.os == 'Linux' || runner.os == 'macOS' }}
       shell: bash
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        expanded=$(envsubst <<<"${input_install_dir}")
-        safe=$(printf '%s' "$expanded" | tr -d '\n\r')
-        echo "$safe" >> "$GITHUB_PATH"
-
+        safe_install_dir=$(envsubst <<<"${input_install_dir}" | tr -d '\n\r')
+        printf '%s\n' "$safe_install_dir" >> "$GITHUB_PATH"
     - if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
         $install_dir = $ExecutionContext.InvokeCommand.ExpandString("${env:input_install_dir}")
-        $safe = $install_dir -replace '[\r\n]', ''
-        Add-Content -Path $env:GITHUB_PATH -Value $safe -Encoding utf8
+        $safe_install_dir = $install_dir -replace "`r|`n", ""
+        $safe_install_dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
