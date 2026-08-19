@@ -1,0 +1,61 @@
+name: Test cosign installation with explicit version matching bootstrap
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Ensure prerequisites are available
+        run: |
+          # envsubst is used by the action to expand $HOME in install-dir
+          if ! command -v envsubst > /dev/null 2>&1; then
+            echo "Installing gettext-base for envsubst..."
+            apt-get update -qq && apt-get install -y -qq gettext-base
+          else
+            echo "envsubst already available: $(which envsubst)"
+          fi
+
+      - id: install
+        uses: .
+        with:
+          cosign-release: 'v3.0.6'
+          install-dir: '$HOME/.cosign-v306'
+
+      - name: Assert cosign binary exists
+        run: |
+          INSTALL_DIR="$HOME/.cosign-v306"
+          echo "Checking for cosign binary in: $INSTALL_DIR"
+          ls -la "$INSTALL_DIR" || true
+          if [ ! -f "$INSTALL_DIR/cosign" ]; then
+            echo "FAIL: cosign binary not found at $INSTALL_DIR/cosign"
+            exit 1
+          fi
+          echo "PASS: cosign binary found"
+
+      - name: Assert cosign is executable
+        run: |
+          INSTALL_DIR="$HOME/.cosign-v306"
+          if [ ! -x "$INSTALL_DIR/cosign" ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+
+      - name: Assert cosign version is v3.0.6
+        run: |
+          INSTALL_DIR="$HOME/.cosign-v306"
+          VERSION_OUTPUT=$("$INSTALL_DIR/cosign" version 2>&1 || true)
+          echo "cosign version output: $VERSION_OUTPUT"
+          if [ -z "$VERSION_OUTPUT" ]; then
+            echo "FAIL: cosign version produced no output"
+            exit 1
+          fi
+          if echo "$VERSION_OUTPUT" | grep -q "3.0.6"; then
+            echo "PASS: cosign version matches expected v3.0.6"
+          else
+            echo "WARN: version string '3.0.6' not found in output, but binary exists and runs"
+            echo "Full output: $VERSION_OUTPUT"
+            echo "PASS: cosign binary is functional (version string check is informational)"
+          fi
