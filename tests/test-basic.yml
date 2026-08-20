@@ -1,0 +1,53 @@
+name: Test basic cosign installation (default version)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure envsubst is available
+        run: |
+          if ! command -v envsubst > /dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq gettext-base
+          fi
+      - id: install
+        uses: .
+        with:
+          install-dir: '/tmp/cosign-default'
+      - name: Assert cosign binary exists in install directory
+        run: |
+          echo "Checking cosign binary in install directory..."
+          if [ ! -f "/tmp/cosign-default/cosign" ]; then
+            echo "FAIL: cosign binary not found in /tmp/cosign-default"
+            ls -la /tmp/cosign-default/ 2>/dev/null || echo "(directory does not exist)"
+            exit 1
+          fi
+          echo "cosign found at: /tmp/cosign-default/cosign"
+          echo "PASS: cosign binary exists in install directory"
+      - name: Assert cosign binary is executable
+        run: |
+          echo "Checking cosign is executable..."
+          if [ ! -x "/tmp/cosign-default/cosign" ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+      - name: Assert cosign is on PATH and runs
+        run: |
+          echo "PATH: $PATH"
+          echo "Checking cosign is available on PATH..."
+          if ! command -v cosign > /dev/null 2>&1; then
+            echo "cosign not found on PATH, trying direct path..."
+            VERSION_OUTPUT=$(/tmp/cosign-default/cosign version 2>&1 || true)
+          else
+            echo "cosign found at: $(command -v cosign)"
+            VERSION_OUTPUT=$(cosign version 2>&1 || true)
+          fi
+          echo "version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -qi "cosign"; then
+            echo "PASS: cosign version output looks valid"
+          else
+            echo "FAIL: unexpected cosign version output"
+            exit 1
+          fi

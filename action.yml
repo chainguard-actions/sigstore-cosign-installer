@@ -284,14 +284,13 @@ runs:
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        expanded=$(envsubst <<<"${input_install_dir}")
-        safe=$(printf '%s' "$expanded" | tr -d '\n\r')
-        echo "$safe" >> "$GITHUB_PATH"
+        safe_install_dir=$(envsubst <<< "${input_install_dir}" | tr -d '\n\r')
+        printf '%s\n' "$safe_install_dir" >> "$GITHUB_PATH"
     - if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
         $install_dir = $ExecutionContext.InvokeCommand.ExpandString("${env:input_install_dir}")
-        $safe = $install_dir -replace '[\r\n]', ''
-        $safe | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        $safe_install_dir = $install_dir -replace "`r|`n", ""
+        Add-Content -Path $env:GITHUB_PATH -Value $safe_install_dir -Encoding utf8

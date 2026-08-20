@@ -8,40 +8,57 @@
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
-**Harden Agent Version:** `1`
+**Harden Agent Version:** `2`
 
-Action **sigstore--cosign-installer/v4.1.1** was hardened automatically. 1 finding(s) were identified and resolved across 2 iteration(s).
+Action **sigstore--cosign-installer/v4.1.1** was hardened automatically. 2 finding(s) were identified and resolved across 2 iteration(s).
 
 ## Findings Fixed
 
 ### github-env-injection (severity: high)
 
-Two steps write the user-controlled input `inputs.install-dir` (mapped to the env var `input_install_dir`) directly to `$GITHUB_PATH` without the required newline-stripping sanitization (`printf '%s' ... | tr -d '\n\r'`).
+Two steps in action.yml write the user-controlled `inputs.install-dir` value (via the `input_install_dir` env var) to `$GITHUB_PATH` without the required sanitization (`printf '%s' ... | tr -d '\n\r'`). 
 
-1. Bash step (Linux/macOS): `run: envsubst <<< "${input_install_dir}" >> "$GITHUB_PATH"` — the value is piped straight to GITHUB_PATH with no sanitization. An attacker-supplied install-dir containing a newline could inject arbitrary entries into PATH.
+1. Linux/macOS step: `run: envsubst <<< "${input_install_dir}" >> "$GITHUB_PATH"` — the value from `inputs.install-dir` flows directly into GITHUB_PATH with no newline stripping.
+2. Windows step: `echo "${install_dir}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append` — same issue; the expanded value of `input_install_dir` (sourced from `inputs.install-dir`) is written to GITHUB_PATH unsanitized.
 
-2. PowerShell step (Windows): `echo "${install_dir}" | Out-File -FilePath $env:GITHUB_PATH` — the expanded value of `input_install_dir` is written to GITHUB_PATH without sanitization, allowing the same newline-injection attack on Windows runners.
+An attacker-controlled newline in the input could inject arbitrary entries into the runner's PATH.
 
 Locations:
 
-- `action.yml:246`
-- `action.yml:253`
+- `action.yml:196`
+- `action.yml:202`
+
+### script-injection (severity: high)
+
+Sub-rule (a): The `test_unsupported_versions` job's 'Verify installation failed' step directly interpolates GitHub Actions expressions inside a `run:` shell script. Specifically:
+- `${{ steps.install-attempt.outcome }}` is interpolated directly into the shell `if` condition
+- `${{ matrix.version }}` is interpolated directly into `echo` commands
+
+These expressions are substituted into the shell script before the shell parses it, allowing an attacker who can influence `matrix.version` values (e.g. via a forked PR that modifies the matrix) to inject arbitrary shell commands. The offending lines are:
+```
+if [[ "${{ steps.install-attempt.outcome }}" == "failure" ]]; then
+  echo "... ${{ matrix.version }}"
+```
+
+Locations:
+
+- `.github/workflows/test-action.yml:107`
+- `.github/workflows/test-action.yml:108`
+- `.github/workflows/test-action.yml:110`
 
 ## Iteration Notes
 
 ### Iteration 1
 
-**Fixes applied:** github-env-injection
+**Fixes applied:** github-env-injection, script-injection
 
 **Notes:**
 
-Fixed two github-env-injection vulnerabilities in action.yml where user-controlled input `inputs.install-dir` was written to $GITHUB_PATH without newline sanitization:
+Fixed two security findings:
 
-1. Bash step (Linux/macOS, line ~246): Changed from single-line `run: envsubst <<<"${input_install_dir}" >> "$GITHUB_PATH"` to a multi-line block that expands with envsubst, then sanitizes with `printf '%s' "$expanded" | tr -d '\n\r'` before writing to $GITHUB_PATH.
+1. github-env-injection in action.yml: Both the Linux/macOS step and Windows step that write the install-dir input to GITHUB_PATH now sanitize the value by stripping newlines before writing. Linux/macOS uses `envsubst <<< "${input_install_dir}" | tr -d '\n\r'` and Windows uses PowerShell's `-replace "`r|`n", ""` pattern.
 
-2. PowerShell step (Windows, line ~253): Added `$safe = $install_dir -replace '[\r\n]', ''` to strip newlines before writing to $GITHUB_PATH via Out-File.
-
-Both fixes prevent newline injection attacks where a malicious `install-dir` value containing newlines could inject arbitrary entries into the runner's PATH.
+2. script-injection in .github/workflows/test-action.yml: The 'Verify installation failed' step in the test_unsupported_versions job now moves `${{ steps.install-attempt.outcome }}` and `${{ matrix.version }}` expressions into the step's env: block as INSTALL_OUTCOME and MATRIX_VERSION, and references them as plain environment variables in the shell script.
 
 ### Iteration 2
 
@@ -49,5 +66,5 @@ Both fixes prevent newline injection attacks where a malicious `install-dir` val
 
 **Notes:**
 
-Fixed all 5 unquoted case statement expansions in action.yml. Changed `case ${runner_os} in` to `case "${runner_os}" in` (2 occurrences: in shaprog() function and main OS dispatch block) and `case ${runner_arch} in` to `case "${runner_arch}" in` (3 occurrences: in Linux, macOS, and Windows sub-blocks). These variables hold values sourced from ${{ runner.os }} and ${{ runner.arch }} expressions and must be double-quoted to prevent script injection.
+Fixed all 5 script-injection findings in hardened/action/action.yml by adding double quotes around ${runner_os} and ${runner_arch} in case statements: (1) case ${runner_os} in inside the shaprog() function, (2) case ${runner_os} in in the main OS dispatch block, (3) case ${runner_arch} in in the Linux branch, (4) case ${runner_arch} in in the macOS branch, and (5) case ${runner_arch} in in the Windows branch. All are now properly quoted as case "${runner_os}" in and case "${runner_arch}" in.
 

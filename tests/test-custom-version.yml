@@ -1,0 +1,49 @@
+name: Test cosign installation with custom version
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure envsubst is available
+        run: |
+          if ! command -v envsubst > /dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq gettext-base
+          fi
+      - id: install
+        uses: .
+        with:
+          cosign-release: 'v2.6.0'
+          install-dir: '/tmp/cosign-v260'
+      - name: Assert cosign binary exists
+        run: |
+          echo "Checking cosign binary..."
+          if [ ! -f "/tmp/cosign-v260/cosign" ]; then
+            echo "FAIL: cosign binary not found in /tmp/cosign-v260"
+            ls -la /tmp/cosign-v260/ 2>/dev/null || echo "(directory does not exist)"
+            exit 1
+          fi
+          echo "cosign found at: /tmp/cosign-v260/cosign"
+          echo "PASS: cosign binary exists"
+      - name: Assert cosign is on PATH
+        run: |
+          echo "Checking cosign is available..."
+          if ! command -v cosign > /dev/null 2>&1; then
+            echo "FAIL: cosign not found on PATH"
+            exit 1
+          fi
+          echo "cosign found at: $(command -v cosign)"
+          echo "PASS: cosign is on PATH"
+      - name: Assert cosign version matches requested
+        run: |
+          echo "Checking cosign version..."
+          VERSION_OUTPUT=$(cosign version 2>&1 || true)
+          echo "version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -q "2.6.0"; then
+            echo "PASS: cosign version matches requested v2.6.0"
+          else
+            echo "FAIL: cosign version does not match requested v2.6.0"
+            echo "Full output: $VERSION_OUTPUT"
+            exit 1
+          fi

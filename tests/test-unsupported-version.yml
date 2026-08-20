@@ -1,0 +1,33 @@
+name: Test cosign installation with unsupported old version
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure envsubst is available
+        run: |
+          if ! command -v envsubst > /dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq gettext-base
+          fi
+      - id: install
+        uses: .
+        with:
+          cosign-release: 'v1.13.0'
+          install-dir: '/tmp/cosign-unsupported'
+        continue-on-error: true
+      - name: Assert action failed for unsupported version
+        env:
+          OUTCOME: ${{ steps.install.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action correctly failed for unsupported cosign version v1.13.0 (below v2.0.0)"
+          elif [ "$OUTCOME" = "success" ]; then
+            echo "FAIL: action should have failed for unsupported version v1.13.0"
+            exit 1
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

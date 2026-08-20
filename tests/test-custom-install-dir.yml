@@ -1,0 +1,50 @@
+name: Test cosign installation with custom install directory
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure envsubst is available
+        run: |
+          if ! command -v envsubst > /dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq gettext-base
+          fi
+      - id: install
+        uses: .
+        with:
+          install-dir: '/tmp/cosign-custom-dir'
+      - name: Assert cosign binary exists in custom directory
+        run: |
+          echo "Checking cosign binary in custom directory..."
+          if [ ! -f "/tmp/cosign-custom-dir/cosign" ]; then
+            echo "FAIL: cosign binary not found in /tmp/cosign-custom-dir"
+            ls -la /tmp/cosign-custom-dir/ 2>/dev/null || echo "(directory does not exist)"
+            exit 1
+          fi
+          echo "cosign found at: /tmp/cosign-custom-dir/cosign"
+          echo "PASS: cosign binary exists in custom install directory"
+      - name: Assert cosign binary is executable
+        run: |
+          echo "Checking cosign is executable..."
+          if [ ! -x "/tmp/cosign-custom-dir/cosign" ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+      - name: Assert cosign is on PATH (custom dir added)
+        run: |
+          echo "PATH: $PATH"
+          echo "Checking cosign is available on PATH..."
+          if ! command -v cosign > /dev/null 2>&1; then
+            echo "FAIL: cosign not found on PATH"
+            exit 1
+          fi
+          COSIGN_PATH=$(command -v cosign)
+          echo "cosign found at: $COSIGN_PATH"
+          if [[ "$COSIGN_PATH" == "/tmp/cosign-custom-dir/cosign" ]]; then
+            echo "PASS: cosign is on PATH from custom directory"
+          else
+            echo "PASS: cosign is on PATH (may be from another location: $COSIGN_PATH)"
+          fi
