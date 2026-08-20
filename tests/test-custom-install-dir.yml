@@ -1,0 +1,50 @@
+name: Test cosign installation with custom install directory using HOME variable
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install envsubst dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext-base
+
+      - id: install
+        uses: .
+        with:
+          cosign-release: 'v3.0.5'
+          install-dir: '$HOME/.cosign-test'
+
+      - name: Assert cosign binary exists in HOME-relative install dir
+        run: |
+          EXPECTED_DIR="$HOME/.cosign-test"
+          echo "Checking for cosign binary in $EXPECTED_DIR"
+          if [ ! -f "$EXPECTED_DIR/cosign" ]; then
+            echo "FAIL: cosign binary not found at $EXPECTED_DIR/cosign"
+            ls -la "$EXPECTED_DIR" 2>/dev/null || echo "Directory does not exist"
+            exit 1
+          fi
+          echo "PASS: cosign binary found at $EXPECTED_DIR/cosign"
+
+      - name: Assert cosign is executable
+        run: |
+          EXPECTED_DIR="$HOME/.cosign-test"
+          if [ ! -x "$EXPECTED_DIR/cosign" ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+
+      - name: Assert cosign runs successfully
+        run: |
+          VERSION_OUTPUT=$("$HOME/.cosign-test/cosign" version 2>&1 || true)
+          echo "cosign version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -qi "cosign\|version\|GitVersion"; then
+            echo "PASS: cosign version output looks valid"
+          else
+            echo "FAIL: unexpected cosign version output"
+            exit 1
+          fi

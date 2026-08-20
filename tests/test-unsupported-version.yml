@@ -1,0 +1,35 @@
+name: Test cosign installation with unsupported old version (below v2.0.0)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install envsubst dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext-base
+
+      - id: install
+        uses: .
+        with:
+          cosign-release: 'v1.13.1'
+          install-dir: /tmp/cosign-old
+        continue-on-error: true
+
+      - name: Assert action failed for unsupported version
+        env:
+          OUTCOME: ${{ steps.install.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action correctly failed for unsupported version v1.13.1"
+          elif [ "$OUTCOME" = "success" ]; then
+            echo "FAIL: action should have failed for unsupported version v1.13.1 (below v2.0.0)"
+            exit 1
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

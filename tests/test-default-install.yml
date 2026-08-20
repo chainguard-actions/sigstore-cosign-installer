@@ -1,0 +1,48 @@
+name: Test cosign installation with all defaults
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install envsubst dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext-base
+
+      - id: install
+        uses: .
+
+      - name: Assert cosign binary exists in default install dir
+        run: |
+          EXPECTED_DIR="$HOME/.cosign"
+          echo "Checking for cosign binary in $EXPECTED_DIR"
+          if [ ! -f "$EXPECTED_DIR/cosign" ]; then
+            echo "FAIL: cosign binary not found at $EXPECTED_DIR/cosign"
+            ls -la "$EXPECTED_DIR" 2>/dev/null || echo "Directory does not exist"
+            exit 1
+          fi
+          echo "PASS: cosign binary found at $EXPECTED_DIR/cosign"
+
+      - name: Assert cosign is executable
+        run: |
+          EXPECTED_DIR="$HOME/.cosign"
+          if [ ! -x "$EXPECTED_DIR/cosign" ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+
+      - name: Assert default version v3.0.3 is installed
+        run: |
+          VERSION_OUTPUT=$("$HOME/.cosign/cosign" version 2>&1 || true)
+          echo "cosign version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -q "3.0.3"; then
+            echo "PASS: default cosign version v3.0.3 is installed"
+          else
+            echo "FAIL: expected default version v3.0.3 but got different output"
+            echo "Full output: $VERSION_OUTPUT"
+            exit 1
+          fi

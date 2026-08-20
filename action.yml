@@ -284,7 +284,7 @@ runs:
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        safe_install_dir=$(envsubst <<<"${input_install_dir}" | tr -d '\n\r')
+        safe_install_dir=$(envsubst <<< "${input_install_dir}" | tr -d '\n\r')
         printf '%s\n' "$safe_install_dir" >> "$GITHUB_PATH"
     - if: ${{ runner.os == 'Windows' }}
       shell: pwsh

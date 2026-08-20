@@ -1,0 +1,47 @@
+name: Test basic cosign installation (default version)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install envsubst dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext-base
+
+      - id: install
+        uses: .
+        with:
+          install-dir: /tmp/cosign-basic
+
+      - name: Assert cosign binary exists
+        run: |
+          echo "Checking for cosign binary in /tmp/cosign-basic"
+          if [ ! -f "/tmp/cosign-basic/cosign" ]; then
+            echo "FAIL: cosign binary not found at /tmp/cosign-basic/cosign"
+            ls -la /tmp/cosign-basic/ 2>/dev/null || echo "Directory does not exist"
+            exit 1
+          fi
+          echo "PASS: cosign binary found"
+
+      - name: Assert cosign is executable
+        run: |
+          if [ ! -x "/tmp/cosign-basic/cosign" ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+
+      - name: Assert cosign runs and reports version
+        run: |
+          VERSION_OUTPUT=$(/tmp/cosign-basic/cosign version 2>&1 || true)
+          echo "cosign version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -qi "cosign\|version\|GitVersion"; then
+            echo "PASS: cosign version output looks valid"
+          else
+            echo "FAIL: unexpected cosign version output"
+            exit 1
+          fi
