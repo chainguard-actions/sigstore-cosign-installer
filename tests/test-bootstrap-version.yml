@@ -1,0 +1,43 @@
+name: Test cosign installation with bootstrap version (early exit path)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: install
+        uses: .
+        with:
+          # v2.5.2 is the bootstrap version — exercises the early-exit code path
+          # where bootstrap version matches requested version
+          cosign-release: 'v2.5.2'
+          install-dir: /tmp/cosign-bootstrap
+      - name: Assert cosign binary exists in install dir
+        run: |
+          echo "Checking cosign binary exists..."
+          if [ ! -f /tmp/cosign-bootstrap/cosign ]; then
+            echo "FAIL: cosign binary not found in /tmp/cosign-bootstrap"
+            ls -la /tmp/cosign-bootstrap/ || echo "(directory does not exist)"
+            exit 1
+          fi
+          echo "PASS: cosign binary found at /tmp/cosign-bootstrap/cosign"
+      - name: Assert cosign is executable
+        run: |
+          echo "Checking cosign is executable..."
+          if [ ! -x /tmp/cosign-bootstrap/cosign ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+      - name: Assert cosign reports version 2.5.2
+        run: |
+          echo "Checking cosign version..."
+          VERSION_OUTPUT=$(/tmp/cosign-bootstrap/cosign version 2>&1 || true)
+          echo "version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -q "2.5.2"; then
+            echo "PASS: cosign version 2.5.2 confirmed"
+          else
+            echo "FAIL: expected version 2.5.2 in output, got: $VERSION_OUTPUT"
+            exit 1
+          fi

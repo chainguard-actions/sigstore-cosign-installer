@@ -1,16 +1,178 @@
-# sigstore/cosign-installer
+# cosign-installer GitHub Action
 
-Installs cosign and includes it in your path
+This action enables you to sign and verify container images using `cosign`.
+`cosign-installer` verifies the integrity of the `cosign` release during installation.
 
-Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at [https://github.com/sigstore/cosign-installer](https://github.com/sigstore/cosign-installer).
+For a quick start guide on the usage of `cosign`, please refer to https://github.com/sigstore/cosign#quick-start.
+For available `cosign` releases, see https://github.com/sigstore/cosign/releases.
 
-## Versions
+## Usage
 
-| Version | Tag | Upstream commit |
-|---------|-----|-----------------|
-| v4.1.0 | [`v4.1.0`](https://github.com/chainguard-actions/sigstore-cosign-installer/tree/v4.1.0) | [`ba7bc0a`](https://github.com/sigstore/cosign-installer/commit/ba7bc0a3fef59531c69a25acd34668d6d3fe6f22) |
-| v4.1.1 | [`v4.1.1`](https://github.com/chainguard-actions/sigstore-cosign-installer/tree/v4.1.1) | [`cad07c2`](https://github.com/sigstore/cosign-installer/commit/cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003) |
-| v4.1.2 | [`v4.1.2`](https://github.com/chainguard-actions/sigstore-cosign-installer/tree/v4.1.2) | [`6f9f177`](https://github.com/sigstore/cosign-installer/commit/6f9f17788090df1f26f669e9d70d6ae9567deba6) |
+This action currently supports GitHub-provided Linux, macOS and Windows runners (self-hosted runners may not work).
+
+Add the following entry to your Github workflow YAML file:
+
+```yaml
+uses: sigstore/cosign-installer@v3.9.1
+with:
+  cosign-release: 'v2.5.2' # optional
+```
+
+Example using a pinned version:
+
+```yaml
+jobs:
+  example:
+    runs-on: ubuntu-latest
+
+    permissions: {}
+
+    name: Install Cosign
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.9.1
+        with:
+          cosign-release: 'v2.5.2'
+      - name: Check install!
+        run: cosign version
+```
+
+Example using the default version:
+
+```yaml
+jobs:
+  example:
+    runs-on: ubuntu-latest
+
+    permissions: {}
+
+    name: Install Cosign
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.9.1
+      - name: Check install!
+        run: cosign version
+```
+
+If you want to install cosign from its main version by using 'go install' under the hood, you can set 'cosign-release' as 'main'. Once you did that, cosign will be installed via 'go install' which means that please ensure that go is installed.
+
+Example of installing cosign via go install:
+
+```yaml
+jobs:
+  example:
+    runs-on: ubuntu-latest
+
+    permissions: {}
+
+    name: Install Cosign via go install
+    steps:
+      - name: Install go
+        uses: actions/setup-go@v5.5.0
+        with:
+          go-version: '1.24'
+          check-latest: true
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.9.1
+        with:
+          cosign-release: main
+      - name: Check install!
+        run: cosign version
+```
+
+This action does not need any GitHub permission to run, however, if your workflow needs to update, create or perform any
+action against your repository, then you should change the scope of the permission appropriately.
+
+For example, if you are using the `gcr.io` as your registry to push the images you will need to give the `write` permission
+to the `packages` scope.
+
+Example of a simple workflow:
+
+```yaml
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # needed for signing the images with GitHub OIDC Token
+
+    name: build-image
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.9.1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3.6.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.11.1
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: docker_meta
+        uses: docker/metadata-action@v5.7.0
+        with:
+          images: ghcr.io/sigstore/sample-honk
+          tags: type=sha,format=long
+
+      - name: Build and Push container images
+        uses: docker/build-push-action@v6.18.0
+        id: build-and-push
+        with:
+          platforms: linux/amd64,linux/arm/v7,linux/arm64
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+
+      # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+      - name: Sign image with a key
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY ${images}
+        env:
+          TAGS: ${{ steps.docker_meta.outputs.tags }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+
+      - name: Sign the images with GitHub OIDC Token
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+          TAGS: ${{ steps.docker_meta.outputs.tags }}
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes ${images}
+```
+
+### Optional Inputs
+The following optional inputs:
+
+| Input | Description |
+| --- | --- |
+| `cosign-release` | `cosign` version to use instead of the default. |
+| `install-dir` | directory to place the `cosign` binary into instead of the default (`$HOME/.cosign`). |
+| `use-sudo` | set to `true` if `install-dir` location requires sudo privs. Defaults to false. |
+
+## Security
+
+Should you discover any security issues, please refer to Sigstore's [security
+process](https://github.com/sigstore/.github/blob/main/SECURITY.md)
 
 ## Privacy
 
