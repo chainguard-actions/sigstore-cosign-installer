@@ -1,0 +1,40 @@
+name: Test cosign installation with bootstrap version (v3.0.2)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: install
+        uses: .
+        with:
+          cosign-release: 'v3.0.2'
+          install-dir: /tmp/cosign-bootstrap
+      - name: Assert cosign binary exists in install dir
+        run: |
+          echo "Checking cosign binary in install dir..."
+          if [ ! -f "/tmp/cosign-bootstrap/cosign" ]; then
+            echo "FAIL: cosign binary not found in /tmp/cosign-bootstrap"
+            ls -la /tmp/cosign-bootstrap/ 2>/dev/null || echo "(directory does not exist)"
+            exit 1
+          fi
+          echo "PASS: cosign binary found at /tmp/cosign-bootstrap/cosign"
+      - name: Assert cosign binary is executable
+        run: |
+          if [ ! -x "/tmp/cosign-bootstrap/cosign" ]; then
+            echo "FAIL: cosign binary is not executable"
+            exit 1
+          fi
+          echo "PASS: cosign binary is executable"
+      - name: Assert cosign version output contains 3.0.2
+        run: |
+          echo "Checking cosign version..."
+          VERSION_OUTPUT=$(/tmp/cosign-bootstrap/cosign version 2>&1 || true)
+          echo "version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -q "3.0.2"; then
+            echo "PASS: version 3.0.2 confirmed in output"
+          else
+            echo "FAIL: version 3.0.2 not found in output: $VERSION_OUTPUT"
+            exit 1
+          fi

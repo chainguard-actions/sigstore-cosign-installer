@@ -1,0 +1,28 @@
+name: Test basic cosign installation (default version)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: install
+        uses: .
+      - name: Assert cosign is in PATH and executable
+        run: |
+          echo "Checking cosign is available in PATH..."
+          if ! command -v cosign > /dev/null 2>&1; then
+            echo "FAIL: cosign not found in PATH"
+            exit 1
+          fi
+          echo "PASS: cosign found at $(command -v cosign)"
+      - name: Assert cosign reports a version
+        run: |
+          echo "Checking cosign version output..."
+          VERSION_OUTPUT=$(cosign version 2>&1 || true)
+          echo "version output: $VERSION_OUTPUT"
+          if [ -z "$VERSION_OUTPUT" ]; then
+            echo "FAIL: cosign version produced no output"
+            exit 1
+          fi
+          echo "PASS: cosign version output is non-empty"

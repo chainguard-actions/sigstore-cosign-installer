@@ -1,0 +1,43 @@
+name: Test cosign installation with specific version
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: install
+        uses: .
+        with:
+          cosign-release: 'v2.6.0'
+          install-dir: /tmp/cosign-v260
+      - name: Assert cosign binary exists
+        run: |
+          echo "Checking cosign binary exists..."
+          if [ ! -f "/tmp/cosign-v260/cosign" ]; then
+            echo "FAIL: cosign binary not found in /tmp/cosign-v260"
+            ls -la /tmp/cosign-v260/ 2>/dev/null || echo "(directory does not exist)"
+            exit 1
+          fi
+          echo "PASS: cosign binary found"
+      - name: Assert cosign is executable and reports version
+        run: |
+          echo "Checking cosign version..."
+          VERSION_OUTPUT=$(/tmp/cosign-v260/cosign version 2>&1 || true)
+          echo "version output: $VERSION_OUTPUT"
+          if [ -z "$VERSION_OUTPUT" ]; then
+            echo "FAIL: cosign version produced no output"
+            exit 1
+          fi
+          echo "PASS: cosign version output is non-empty"
+      - name: Assert installed version matches requested
+        run: |
+          echo "Checking installed version matches v2.6.0..."
+          VERSION_OUTPUT=$(/tmp/cosign-v260/cosign version 2>&1 || true)
+          echo "version output: $VERSION_OUTPUT"
+          if echo "$VERSION_OUTPUT" | grep -q "2.6.0"; then
+            echo "PASS: version 2.6.0 confirmed in output"
+          else
+            echo "FAIL: version 2.6.0 not found in output: $VERSION_OUTPUT"
+            exit 1
+          fi
