@@ -13,6 +13,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | v4.1.0 | [`v4.1.0`](https://github.com/chainguard-actions/sigstore-cosign-installer/tree/v4.1.0) | [`ba7bc0a`](https://github.com/sigstore/cosign-installer/commit/ba7bc0a3fef59531c69a25acd34668d6d3fe6f22) | [`HARDENING.md`](https://github.com/chainguard-actions/sigstore-cosign-installer/blob/v4.1.0/HARDENING.md) |
 | v4.1.1 | [`v4.1.1`](https://github.com/chainguard-actions/sigstore-cosign-installer/tree/v4.1.1) | [`cad07c2`](https://github.com/sigstore/cosign-installer/commit/cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003) | [`HARDENING.md`](https://github.com/chainguard-actions/sigstore-cosign-installer/blob/v4.1.1/HARDENING.md) |
 | v4.1.2 | [`v4.1.2`](https://github.com/chainguard-actions/sigstore-cosign-installer/tree/v4.1.2) | [`6f9f177`](https://github.com/sigstore/cosign-installer/commit/6f9f17788090df1f26f669e9d70d6ae9567deba6) | [`HARDENING.md`](https://github.com/chainguard-actions/sigstore-cosign-installer/blob/v4.1.2/HARDENING.md) |
+| v4.1.3 | [`v4.1.3`](https://github.com/chainguard-actions/sigstore-cosign-installer/tree/v4.1.3) | [`756fe2d`](https://github.com/sigstore/cosign-installer/commit/756fe2d284c7292c4e9b62c8a28f1e5629c59532) | [`HARDENING.md`](https://github.com/chainguard-actions/sigstore-cosign-installer/blob/v4.1.3/HARDENING.md) |
 
 ## Privacy
 
