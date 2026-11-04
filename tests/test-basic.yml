@@ -1,0 +1,52 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure envsubst and curl are available (act image may lack them)
+        run: |
+          SUDO=""
+          if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null; then SUDO=sudo; fi
+          if ! command -v envsubst >/dev/null || ! command -v curl >/dev/null; then
+            ($SUDO apt-get update -qq && $SUDO apt-get install -y -qq gettext-base curl ca-certificates) || true
+          fi
+          if ! command -v envsubst >/dev/null; then
+            echo "Installing envsubst shim"
+            mkdir -p "$HOME/test-shims"
+            cat > "$HOME/test-shims/envsubst" <<'EOF'
+          #!/bin/bash
+          while IFS= read -r line || [ -n "$line" ]; do
+            eval "printf '%s\n' \"$line\""
+          done
+          EOF
+            chmod +x "$HOME/test-shims/envsubst"
+            echo "$HOME/test-shims" >> "$GITHUB_PATH"
+          fi
+          command -v curl || { echo "curl unavailable"; exit 1; }
+      - id: action
+        uses: .
+      - name: Assert cosign binary installed in default dir
+        run: |
+          ls -la "$HOME/.cosign" || true
+          if [ ! -x "$HOME/.cosign/cosign" ]; then
+            echo "FAIL: $HOME/.cosign/cosign not found or not executable"
+            exit 1
+          fi
+          if [ -e "$HOME/.cosign/cosign-bootstrap" ]; then
+            echo "FAIL: bootstrap binary should have been renamed"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cosign is on PATH and is the default version
+        run: |
+          command -v cosign || { echo "FAIL: cosign not on PATH"; exit 1; }
+          OUT="$(cosign version 2>&1)"
+          echo "$OUT"
+          if ! echo "$OUT" | grep -q "v3.1.4"; then
+            echo "FAIL: expected version v3.1.4"
+            exit 1
+          fi
+          echo "PASS"

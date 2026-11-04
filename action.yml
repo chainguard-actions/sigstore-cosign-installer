@@ -1,0 +1,319 @@
+# action.yml
+name: cosign-installer
+author: sigstore
+description: 'Installs cosign and includes it in your path'
+branding:
+  icon: 'package'
+  color: 'blue'
+# This is pinned to the last major release, we have to bump it for each action version.
+inputs:
+  cosign-release:
+    description: 'cosign release version to be installed'
+    required: false
+    default: 'v3.1.4'
+  install-dir:
+    description: 'Where to install the cosign binary'
+    required: false
+    default: '$HOME/.cosign'
+  use-sudo:
+    description: 'set to true if install-dir location requires sudo privs'
+    required: false
+    default: 'false'
+  curl-retries:
+    description: 'number of times to retry each download on transient network failures (e.g. GitHub CDN 504s)'
+    required: false
+    default: '6'
+runs:
+  using: "composite"
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    # We verify the version against a SHA **in the published action itself**, not in the GCS bucket.
+    - shell: bash
+      env:
+        input_cosign_release: ${{ inputs.cosign-release }}
+        input_install_dir: ${{ inputs.install-dir }}
+        input_use_sudo: ${{ inputs.use-sudo }}
+        input_curl_retries: ${{ inputs.curl-retries }}
+        runner_arch: ${{ runner.arch }}
+        runner_os: ${{ runner.os }}
+      run: |
+        #!/bin/bash
+        # Substitute environment variables in install-dir input
+        install_dir=$(envsubst <<<"${input_install_dir}")
+
+        # cosign install script
+        shopt -s expand_aliases
+        if [ -z "$NO_COLOR" ]; then
+          alias log_info="echo -e \"\033[1;32mINFO\033[0m:\""
+          alias log_error="echo -e \"\033[1;31mERROR\033[0m:\""
+        else
+          alias log_info="echo \"INFO:\""
+          alias log_error="echo \"ERROR:\""
+        fi
+        set -e
+
+        CURL_RETRIES="${input_curl_retries:-6}"
+        # Retry options shared by every release download below. GitHub's release
+        # CDN intermittently returns transient HTTP 504s that can persist for
+        # ~15-20s, outlasting curl's default exponential backoff (~7s across 3
+        # retries). A fixed 5s delay with --retry-all-errors rides out those
+        # windows, while --retry-max-time 120 keeps a failing download bounded.
+        CURL_RETRY_OPTS=(--retry "${CURL_RETRIES}" --retry-delay 5 --retry-all-errors --retry-max-time 120)
+
+        # This function helps compare versions.
+        # Returns 0 if version1 >= version2, 1 otherwise.
+        # Usage: is_version_ge "3.0.0" "$version_num"
+        is_version_ge() {
+            [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]
+        }
+
+        # Check for unsupported old versions (anything below v2.0.0)
+        if [[ "${input_cosign_release}" != "main" ]]; then
+          # Extract version without 'v' prefix for comparison
+          version_num="${input_cosign_release}"
+          version_num="${version_num#v}"
+
+          # Check if version is less than v2.0.0
+          if ! is_version_ge "2.0.0" "$version_num"; then
+            log_error "cosign versions below v2.0.0 are no longer supported."
+            log_error "Requested version: ${input_cosign_release}"
+            log_error "Please use cosign v2.6.0 or later."
+            log_error "See https://github.com/sigstore/cosign/releases for available versions."
+            exit 1
+          fi
+        fi
+
+        mkdir -p "${install_dir}"
+
+        if [[ "${input_cosign_release}" == "main" ]]; then
+          log_info "installing cosign via 'go install' from its main version"
+          GOBIN=$(go env GOPATH)/bin
+          go install github.com/sigstore/cosign/v3/cmd/cosign@main
+          ln -s "$GOBIN/cosign" "${install_dir}/cosign"
+          exit 0
+        fi
+
+        shaprog() {
+          case "${runner_os}" in
+            Linux|linux)
+              sha256sum "$1" | cut -d' ' -f1
+              ;;
+            macOS|macos)
+              shasum -a256 "$1" | cut -d' ' -f1
+              ;;
+            Windows|windows)
+              powershell -command "(Get-FileHash \"$1\" -Algorithm SHA256 | Select-Object -ExpandProperty Hash).ToLower()"
+              ;;
+            *)
+              log_error "unsupported OS ${runner_os}"
+              exit 1
+              ;;
+          esac
+        }
+
+        ## curl -sL https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign_checksums.txt |\
+        ##   gawk 'match($2,/^cosign-([[:alnum:]]+)-([[:alnum:]]+)(\.[[:alnum:]]+)?$/,a){printf "bootstrap_%s_%s_sha=\"%s\"\n",a[1],a[2],$1}' |\
+        ##   LANG=C sort
+        bootstrap_version='v3.1.4'
+        bootstrap_darwin_amd64_sha="9d1e4abe2b6be279ed0d2ff706fde1ccd738747c834e3e6d44039c238867334f"
+        bootstrap_darwin_arm64_sha="9f9b8cd557cf2e5b3df3373a00baa005a86b02391e3e06dd0ce37b3a1533d3a4"
+        bootstrap_linux_amd64_sha="424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
+        bootstrap_linux_arm64_sha="ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2"
+        bootstrap_linux_arm_sha="09e77a313910cf5c4774508d85d017d9c60983f41bf657f83ecbd3892f7952cb"
+        bootstrap_linux_ppc64le_sha="0887fca23319ea017cc827e6a845ba83722a36bf9e932f35c747ca83c14cec49"
+        bootstrap_linux_riscv64_sha="24f3865df0fd9b055827b888d56e13583112ac7d4c87b45967af1f0febf35455"
+        bootstrap_linux_s390x_sha="777978d576af893a3daf1fcf3b0e9178cebcbc083a669f6125b6c97b8e1fe433"
+        bootstrap_windows_amd64_sha="cbe953787074611f1334cbf37dc1cf953995bb8c45398eb4fc7bb781d29c1f2a"
+
+        cosign_executable_name=cosign
+        bootstrap_executable_name=cosign-bootstrap
+
+        trap "popd >/dev/null" EXIT
+
+        pushd "${install_dir}" > /dev/null
+
+        case "${runner_os}" in
+          Linux|linux)
+            case "${runner_arch}" in
+              X64|amd64)
+                bootstrap_filename='cosign-linux-amd64'
+                bootstrap_sha=${bootstrap_linux_amd64_sha}
+                desired_cosign_filename='cosign-linux-amd64'
+                ;;
+
+              ARM|arm)
+                bootstrap_filename='cosign-linux-arm'
+                bootstrap_sha=${bootstrap_linux_arm_sha}
+                desired_cosign_filename='cosign-linux-arm'
+                ;;
+
+              ARM64|arm64)
+                bootstrap_filename='cosign-linux-arm64'
+                bootstrap_sha=${bootstrap_linux_arm64_sha}
+                desired_cosign_filename='cosign-linux-arm64'
+                ;;
+
+              *)
+                log_error "unsupported architecture ${runner_arch}"
+                exit 1
+                ;;
+            esac
+            ;;
+
+          macOS|macos)
+            case "${runner_arch}" in
+              X64|amd64)
+                bootstrap_filename='cosign-darwin-amd64'
+                bootstrap_sha=${bootstrap_darwin_amd64_sha}
+                desired_cosign_filename='cosign-darwin-amd64'
+                ;;
+
+              ARM64|arm64)
+                bootstrap_filename='cosign-darwin-arm64'
+                bootstrap_sha=${bootstrap_darwin_arm64_sha}
+                desired_cosign_filename='cosign-darwin-arm64'
+                ;;
+
+              *)
+                log_error "unsupported architecture ${runner_arch}"
+                exit 1
+                ;;
+            esac
+            ;;
+
+          Windows|windows)
+            case "${runner_arch}" in
+              X64|amd64)
+                bootstrap_filename='cosign-windows-amd64.exe'
+                bootstrap_sha=${bootstrap_windows_amd64_sha}
+                desired_cosign_filename='cosign-windows-amd64.exe'
+                cosign_executable_name=cosign.exe
+                bootstrap_executable_name=cosign-bootstrap.exe
+                ;;
+              *)
+                log_error "unsupported architecture ${runner_arch}"
+                exit 1
+                ;;
+            esac
+            ;;
+          *)
+            log_error "unsupported os ${runner_os}"
+            exit 1
+            ;;
+        esac
+
+        SUDO=
+        if [[ "${input_use_sudo}" == "true" ]] && command -v sudo >/dev/null; then
+          SUDO=sudo
+        fi
+
+        expected_bootstrap_version_digest=${bootstrap_sha}
+        log_info "Downloading bootstrap version '${bootstrap_version}' of cosign to verify version to be installed...\n      https://github.com/sigstore/cosign/releases/download/${bootstrap_version}/${bootstrap_filename}"
+        $SUDO curl "${CURL_RETRY_OPTS[@]}" -fsSL "https://github.com/sigstore/cosign/releases/download/${bootstrap_version}/${bootstrap_filename}" -o "${bootstrap_executable_name}"
+        shaBootstrap=$(shaprog "${bootstrap_executable_name}")
+        if [[ "$shaBootstrap" != "${expected_bootstrap_version_digest}" ]]; then
+          log_error "Unable to validate cosign version: '${input_cosign_release}'"
+          exit 1
+        fi
+        $SUDO chmod +x "${bootstrap_executable_name}"
+
+        # If the bootstrap and specified `cosign` releases are the same, we're done.
+        if [[ "${input_cosign_release}" == "${bootstrap_version}" ]]; then
+          log_info "bootstrap version successfully verified and matches requested version so nothing else to do"
+          $SUDO mv "${bootstrap_executable_name}" "${cosign_executable_name}"
+          exit 0
+        fi
+
+        semver='^v([0-9]+\.){0,2}(\*|[0-9]+)(-?r?c?)(\.[0-9]+)$'
+        if [[ "${input_cosign_release}" =~ $semver ]]; then
+          log_info "Custom cosign version '${input_cosign_release}' requested"
+        else
+          log_error "Unable to validate requested cosign version: '${input_cosign_release}'"
+          exit 1
+        fi
+
+        # Download custom cosign
+        log_info "Downloading platform-specific version '${input_cosign_release}' of cosign...\n      https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${desired_cosign_filename}"
+        $SUDO curl "${CURL_RETRY_OPTS[@]}" -fsSL "https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${desired_cosign_filename}" -o "cosign_${input_cosign_release}"
+        shaCustom=$(shaprog "cosign_${input_cosign_release}");
+
+        # same hash means it is the same release
+        if [[ "$shaCustom" != "$shaBootstrap" ]]; then
+          log_info "Downloading cosign public key '${input_cosign_release}' of cosign...\n    https://raw.githubusercontent.com/sigstore/cosign/${input_cosign_release}/release/release-cosign.pub"
+          RELEASE_COSIGN_PUB_KEY="https://raw.githubusercontent.com/sigstore/cosign/${input_cosign_release}/release/release-cosign.pub"
+          RELEASE_COSIGN_PUB_KEY_SHA='f4cea466e5e887a45da5031757fa1d32655d83420639dc1758749b744179f126'
+
+          log_info "Verifying public key matches expected value"
+          $SUDO curl "${CURL_RETRY_OPTS[@]}" -fsSL "$RELEASE_COSIGN_PUB_KEY" -o public.key
+          sha_fetched_key=$(shaprog public.key)
+          if [[ "$sha_fetched_key" != "$RELEASE_COSIGN_PUB_KEY_SHA" ]]; then
+            log_error "Fetched public key does not match expected digest, exiting"
+            exit 1
+          fi
+
+          if is_version_ge "3.0.1" "$version_num"; then
+            # we're trying to get something greater than or equal to v3.0.1
+            keyless_signature_file=${desired_cosign_filename}.sigstore.json
+            log_info "Downloading keyless verification bundle for platform-specific '${input_cosign_release}' of cosign...\n      https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${keyless_signature_file}"
+            $SUDO curl "${CURL_RETRY_OPTS[@]}" -fsSLO "https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${keyless_signature_file}"
+
+            log_info "Using bootstrap cosign to verify keyless signature of desired cosign version"
+            "./${bootstrap_executable_name}" verify-blob --certificate-identity=keyless@projectsigstore.iam.gserviceaccount.com --certificate-oidc-issuer=https://accounts.google.com --bundle "${keyless_signature_file}" "cosign_${input_cosign_release}"
+
+            if is_version_ge "3.0.3" "$version_num"; then
+              # we're trying to get something greater than or equal to v3.0.3
+              kms_signature_file=${desired_cosign_filename}-kms.sigstore.json
+              log_info "Downloading KMS verification bundle for platform-specific '${input_cosign_release}' of cosign...\n      https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${kms_signature_file}"
+              $SUDO curl "${CURL_RETRY_OPTS[@]}" -fsSLO "https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${kms_signature_file}"
+
+              log_info "Using bootstrap cosign to verify signature of desired cosign version"
+              "./${bootstrap_executable_name}" verify-blob --key public.key --bundle "${kms_signature_file}" "cosign_${input_cosign_release}"
+            fi
+          else
+            signature_file=${desired_cosign_filename}.sig
+            log_info "Downloading detached signature for platform-specific '${input_cosign_release}' of cosign...\n      https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${signature_file}"
+            $SUDO curl "${CURL_RETRY_OPTS[@]}" -fsSLO "https://github.com/sigstore/cosign/releases/download/${input_cosign_release}/${signature_file}"
+
+            log_info "Using bootstrap cosign to verify signature of desired cosign version"
+            "./${bootstrap_executable_name}" verify-blob --key public.key --signature "${signature_file}" "cosign_${input_cosign_release}"
+          fi
+
+          $SUDO mv "cosign_${input_cosign_release}" "${cosign_executable_name}"
+          $SUDO chmod +x "${cosign_executable_name}"
+          # best-effort: on Windows the just-run bootstrap binary may still be locked briefly
+          $SUDO rm -f "${bootstrap_executable_name}" || log_info "Unable to remove ${bootstrap_executable_name}, leaving it in place"
+          log_info "Installation complete!"
+        fi
+
+    - if: ${{ runner.os == 'Linux' || runner.os == 'macOS' }}
+      shell: bash
+      env:
+        input_install_dir: ${{ inputs.install-dir }}
+      run: |
+        expanded_install_dir="$(envsubst <<<"${input_install_dir}")"
+        safe_install_dir="$(printf '%s' "$expanded_install_dir" | tr -d '\n\r')"
+        echo "$safe_install_dir" >> "$GITHUB_PATH"
+
+    - if: ${{ runner.os == 'Windows' }}
+      shell: pwsh
+      env:
+        input_install_dir: ${{ inputs.install-dir }}
+      run: |
+        $install_dir = $ExecutionContext.InvokeCommand.ExpandString("${env:input_install_d        $install_dir = $install_dir -replace "[`r`n]", ""
+        echo "${install_dir}" | Out-Filet-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
