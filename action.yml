@@ -315,5 +315,16 @@ runs:
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        $install_dir = $ExecutionContext.InvokeCommand.ExpandString("${env:input_install_d        $install_dir = $install_dir -replace "[`r`n]", ""
-        echo "${install_dir}" | Out-Filet-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        # Substitute only variable references ($NAME, ${NAME}, $env:NAME, ${env:NAME}, %NAME%)
+        # without evaluating the input as PowerShell code.
+        $install_dir = [regex]::Replace("${env:input_install_dir}", '\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}|\$(?:env:)?([A-Za-z_][A-Za-z0-9_]*)', {
+          param($m)
+          $name = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+          $val = [Environment]::GetEnvironmentVariable($name)
+          if ($null -eq $val -and $name -ieq 'HOME') { $val = $HOME }
+          if ($null -eq $val) { $val = '' }
+          $val
+        })
+        $install_dir = [Environment]::ExpandEnvironmentVariables($install_dir)
+        $install_dir = $install_dir -replace "[`r`n]", ""
+        echo "${install_dir}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
