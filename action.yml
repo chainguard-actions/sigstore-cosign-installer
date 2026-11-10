@@ -236,7 +236,7 @@ runs:
         # same hash means it is the same release
         if [[ "$shaCustom" != "$shaBootstrap" ]]; then
           log_info "Downloading cosign public key '${input_cosign_release}' of cosign...\n    https://raw.githubusercontent.com/sigstore/cosign/${input_cosign_release}/release/release-cosign.pub"
-          RELEASE_COSIGN_PUB_KEY=https://raw.githubusercontent.com/sigstore/cosign/${input_cosign_release}/release/release-cosign.pub
+          RELEASE_COSIGN_PUB_KEY="https://raw.githubusercontent.com/sigstore/cosign/${input_cosign_release}/release/release-cosign.pub"
           RELEASE_COSIGN_PUB_KEY_SHA='f4cea466e5e887a45da5031757fa1d32655d83420639dc1758749b744179f126'
 
           log_info "Verifying public key matches expected value"
@@ -279,18 +279,33 @@ runs:
           $SUDO chmod +x "${cosign_executable_name}"
           log_info "Installation complete!"
         fi
+
     - if: ${{ runner.os == 'Linux' || runner.os == 'macOS' }}
       shell: bash
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        safe_install_dir=$(envsubst <<< "${input_install_dir}" | tr -d '\n\r')
+        install_dir=$(envsubst <<<"${input_install_dir}")
+        safe_install_dir=$(printf '%s' "$install_dir" | tr -d '\n\r')
         printf '%s\n' "$safe_install_dir" >> "$GITHUB_PATH"
+
     - if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        $install_dir = $ExecutionContext.InvokeCommand.ExpandString("${env:input_install_dir}")
-        $safe_install_dir = $install_dir -replace "`r|`n", ""
+        # Expand only variable references ($NAME, ${NAME}, $env:NAME, ${env:NAME});
+        # never evaluate $(...) subexpressions or other code from the input.
+        $install_dir = [regex]::Replace("${env:input_install_dir}", '\$\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}|\$(env:)?([A-Za-z_][A-Za-z0-9_]*)', {
+          param($m)
+          $isEnv = $m.Groups[1].Success -or $m.Groups[3].Success
+          $name = if ($m.Groups[2].Success) { $m.Groups[2].Value } else { $m.Groups[4].Value }
+          $envVal = [System.Environment]::GetEnvironmentVariable($name)
+          if ($isEnv) { if ($null -ne $envVal) { return $envVal } else { return '' } }
+          $var = Get-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue
+          if ($null -ne $var -and $null -ne $var.Value) { return [string]$var.Value }
+          if ($null -ne $envVal) { return $envVal }
+          return ''
+        })
+        $safe_install_dir = $install_dir -replace '[\r\n]', ''
         Add-Content -Path $env:GITHUB_PATH -Value $safe_install_dir -Encoding utf8
