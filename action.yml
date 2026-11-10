@@ -285,18 +285,29 @@ runs:
           $SUDO chmod +x "${cosign_executable_name}"
           log_info "Installation complete!"
         fi
+
     - if: ${{ runner.os == 'Linux' || runner.os == 'macOS' }}
       shell: bash
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        safe_install_dir=$(printf '%s' "$(envsubst <<< "${input_install_dir}")" | tr -d '\n\r')
+        raw_install_dir="$(envsubst <<<"${input_install_dir}")"
+        safe_install_dir="$(printf '%s' "${raw_install_dir}" | tr -d '\n\r')"
         printf '%s\n' "${safe_install_dir}" >> "$GITHUB_PATH"
+
     - if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       env:
         input_install_dir: ${{ inputs.install-dir }}
       run: |
-        $install_dir = $ExecutionContext.InvokeCommand.ExpandString("${env:input_install_dir}")
-        $safe_install_dir = $install_dir -replace '[\r\n]', ''
-        $safe_install_dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        # Expand only variable references ($NAME, ${NAME}, $env:NAME, ${env:NAME}); never evaluate code.
+        $install_dir = [regex]::Replace($env:input_install_dir, '\$(?:\{(?:env:)?(\w+)\}|(?:env:)?(\w+))', {
+          param($m)
+          $name = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+          if ($name -ieq 'HOME') { return $HOME }
+          $val = [Environment]::GetEnvironmentVariable($name)
+          if ($null -eq $val) { return '' }
+          return $val
+        })
+        $safe_install_dir = $install_dir -replace "[`r`n]", ''
+        echo "${safe_install_dir}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
