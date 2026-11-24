@@ -1,6 +1,11 @@
 {
   "owner": "sigstore",
   "repo": "cosign-installer",
-  "version": "",
-  "url": "https://github.com/sigstore/cosign-installer"
+  "version": "v4.1.4",
+  "commit_sha": "881c63bd87e38389154debd8331404ce7ca8a3ab",
+  "url": "https://github.com/sigstore/cosign-installer",
+  "policy_sha": "374911c4be584df24e6da57af2d990570ef0f859",
+  "test_policy_sha": "843adf9e4b8f85d0c08b27b9d0b09dd094b54702",
+  "test_agent_version": "2",
+  "harden_agent_version": "2"
 }
